@@ -1,0 +1,133 @@
+graph TB
+    subgraph "Application Entry Points"
+        Main[assistantMain.py<br/>Streamlit Application]
+        Eval[evaluator.py<br/>Evaluation Script]
+    end
+
+    subgraph "Configuration Layer"
+        Args[CLI Arguments<br/>path_to_pdf<br/>email_to_send]
+        Env[Environment Variables<br/>.env file<br/>API Keys]
+        Creds[credentials.json<br/>Gmail OAuth2]
+    end
+
+    subgraph "Core Agent - agentProfessor.py"
+        
+        subgraph "Initialization: create_chatbot()"
+            Load[Load Configuration]
+            InitEmbed[Initialize Embeddings]
+            InitLLM[Initialize Gemini LLM]
+            InitGmail[Initialize Gmail Tool]
+        end
+        
+        subgraph "Document Processing"
+            PDF[PDF Input] --> PDFLoader[PyPDFLoader]
+            PDFLoader --> TextSplit[RecursiveCharacterTextSplitter]
+            TextSplit --> Chunks[Document Chunks]
+        end
+        
+        subgraph "Vector Storage"
+            Chunks --> Embedder[HuggingFace Embeddings<br/>sentence-transformers/all-MiniLM-L6-v2]
+            Embedder --> QdrantStore[Qdrant VectorStore<br/>in-memory COSINE]
+        end
+        
+        subgraph "Custom Classes"
+            StateClass[State TypedDict<br/>- input: str<br/>- context: List<br/>- answer_basic: str<br/>- answer_middle: str<br/>- answer_final: str<br/>- post_status: str]
+            RetrieverClass[TextRetriever<br/>BaseRetriever<br/>similarity_search]
+        end
+        
+        subgraph "LangGraph Pipeline"
+            Node1[retrieve<br/>Get relevant docs]
+            Node2[generate_basic<br/>Initial answer<br/>Prompt Template 1]
+            Node3[generate_middle<br/>Improve answer<br/>Prompt Template 2]
+            Node4[generate_final<br/>Format as lecture notes<br/>Prompt Template 3]
+            Node5[post_message<br/>Send via Gmail]
+            
+            Node1 --> Node2 --> Node3 --> Node4 --> Node5
+        end
+        
+        GraphCompile[StateGraph.compile<br/>Returns compiled graph]
+        AgentFunc[my_agent function<br/>Wrapper for invocation]
+    end
+
+    subgraph "External APIs"
+        GeminiAPI[Google Gemini API<br/>gemini-2.5-flash<br/>3 LLM calls per query]
+        GmailAPI[Gmail API<br/>Send email with notes]
+        LangSmithAPI[LangSmith API<br/>Tracing & Evaluation]
+    end
+
+    subgraph "Streamlit UI"
+        Title[Title: Assistant for creating lecture notes]
+        SessionState[Session State<br/>Message History]
+        ChatInput[User Input Widget]
+        ChatDisplay[Chat Message Display]
+        Spinner[Loading Spinner]
+    end
+
+    subgraph "Evaluation System"
+        LSClient[LangSmith Client]
+        LSDataset[Dataset: Lecture Notes Evaluation<br/>3 examples]
+        EvalLLM[OpenAI GPT-4o-mini<br/>Criteria Evaluator]
+        Criteria[Custom Criteria<br/>Relevance: 1-5<br/>Clarity: 1-5]
+        EvalWrapper[safe_criteria_evaluator<br/>Error handling wrapper]
+        RunFunc[run_graph_for_eval<br/>Execute chatbot]
+        EvalResults[Evaluation Results<br/>Experiment in LangSmith]
+    end
+
+    %% Main Flow
+    Main --> Args
+    Main --> Load
+    Args --> Load
+    Env --> Load
+    
+    Load --> InitEmbed
+    Load --> InitLLM
+    Load --> InitGmail
+    Creds --> InitGmail
+    
+    PDF --> PDFLoader
+    Chunks --> QdrantStore
+    QdrantStore --> RetrieverClass
+    
+    RetrieverClass --> Node1
+    InitLLM -.-> Node2
+    InitLLM -.-> Node3
+    InitLLM -.-> Node4
+    InitGmail --> Node5
+    
+    Node1 --> Node2
+    GraphCompile --> AgentFunc
+    
+    %% UI Flow
+    Main --> Title
+    Main --> SessionState
+    ChatInput --> AgentFunc
+    AgentFunc --> ChatDisplay
+    AgentFunc --> Spinner
+    
+    %% Evaluation Flow
+    Eval --> Env
+    Eval --> LSClient
+    LSClient --> LSDataset
+    Eval --> GraphCompile
+    GraphCompile --> RunFunc
+    RunFunc --> EvalWrapper
+    EvalWrapper --> EvalLLM
+    Criteria --> EvalLLM
+    EvalWrapper --> EvalResults
+    
+    %% External connections
+    Node2 -.LLM call.-> GeminiAPI
+    Node3 -.LLM call.-> GeminiAPI
+    Node4 -.LLM call.-> GeminiAPI
+    Node5 -.Send email.-> GmailAPI
+    EvalResults -.Upload.-> LangSmithAPI
+    
+    %% Styling
+    style Main fill:#ffe1f0,stroke:#333,stroke-width:3px
+    style Eval fill:#f0e1ff,stroke:#333,stroke-width:3px
+    style GeminiAPI fill:#ffe1e1,stroke:#333,stroke-width:2px
+    style GmailAPI fill:#e1ffe1,stroke:#333,stroke-width:2px
+    style LangSmithAPI fill:#f0e1ff,stroke:#333,stroke-width:2px
+    style QdrantStore fill:#fff4e1,stroke:#333,stroke-width:2px
+    style StateClass fill:#ffffcc,stroke:#333,stroke-width:2px
+    style GraphCompile fill:#e1f5ff,stroke:#333,stroke-width:2px
